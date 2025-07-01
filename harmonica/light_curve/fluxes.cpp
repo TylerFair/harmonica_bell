@@ -142,14 +142,14 @@ void Fluxes::transit_flux(const double d, const double z,
 
   this->compute_solution_vector(d, z, nu);
 
-  // Compute transit flux: alpha=I0sTp.
+  // Compute transit flux: alpha=sTp, then normalize by I0
   if (m_ld_law == limb_darkening::quadratic) {
-    m_alpha = m_I_0 * (m_s0 * m_p(0) + m_s1 * m_p(1) + m_s2 * m_p(2));
+    m_alpha = m_s0 * m_p(0) + m_s1 * m_p(1) + m_s2 * m_p(2);
   } else {
-    m_alpha = m_I_0 * (m_s0 * m_p(0) + m_s12 * m_p(1) + m_s1 * m_p(2)
-                       + m_s32 * m_p(3) + m_s2 * m_p(4));
+    m_alpha = m_s0 * m_p(0) + m_s12 * m_p(1) + m_s1 * m_p(2)
+              + m_s32 * m_p(3) + m_s2 * m_p(4);
   }
-  out_f = 1. - m_alpha;
+  out_f = 1. - (m_alpha / m_I_0);
 }
 
 
@@ -163,7 +163,7 @@ void Fluxes::compute_solution_vector(const double d, const double z,
 
   if (z > 0.) {
     // Find planet-stellar limb intersections.
-    this->find_intersections_theta(d, nu);
+    this->find_intersections_theta(d, z, nu);
 
     // Iterate thetas in adjacent pairs around the enclosed overlap region.
     for (int j = 0; j < m_theta_type.size(); j++) {
@@ -188,7 +188,7 @@ void Fluxes::compute_solution_vector(const double d, const double z,
 }
 
 
-void Fluxes::find_intersections_theta(const double d, const double nu) {
+void Fluxes::find_intersections_theta(const double d, const double z, const double nu) {
 
   // Check cases where no obvious intersections, avoiding eigenvalue runtime.
   if (this->no_obvious_intersections(d, nu)) { return; }
@@ -217,7 +217,7 @@ void Fluxes::find_intersections_theta(const double d, const double nu) {
 
   if (m_theta.size() == 0) {
     // No roots, check which trivial case this configuration corresponds to.
-    if (this->trivial_configuration(d, nu)) { return; }
+    if (this->trivial_configuration(d, z, nu)) { return; }
   }
 
   // Sort thetas in ascending order, -pi < theta <= pi.
@@ -617,7 +617,12 @@ std::vector<double> Fluxes::compute_real_theta_roots(
 }
 
 
-bool Fluxes::trivial_configuration(const double d, const double nu) {
+bool Fluxes::trivial_configuration(const double d, const double z, const double nu) {
+
+  // Use z to distinguish between transit (planet in front) and eclipse (behind)
+  // In eclipse phase, even if there's geometric overlap, flux contribution is zero.
+  // Planet is in front of the star if z ≥ 0
+  bool is_transit = z >= 0.0;
 
   bool tc = false;
   double _nu = nu;
@@ -627,8 +632,15 @@ bool Fluxes::trivial_configuration(const double d, const double nu) {
     if (_rp_nu < 1. + d) {
       // Planet radius toward stellar centre closer than stellar limb.
       // Overlap region enclosed by entire planet's limb as no intersects.
-      m_theta = {nu - fractions::pi, nu + fractions::pi};
-      m_theta_type = {intersections::entire_planet};
+      if (is_transit) {
+        // Overlap region enclosed by entire planet's limb (transit).
+        m_theta = {nu - fractions::pi, nu + fractions::pi};
+        m_theta_type = {intersections::entire_planet};
+      } else {
+        // In eclipse: planet behind star, entire stellar disc is covered.
+        m_theta = {-fractions::pi, fractions::pi};
+        m_theta_type = {intersections::entire_star};
+      }
       tc = true;
     } else if (_rp_nu > 1. + d) {
       // Planet radius toward stellar centre beyond stellar limb.
