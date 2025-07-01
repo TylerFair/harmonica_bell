@@ -29,9 +29,9 @@ def ir_dtype(np_dtype):
 
 
 def ir_constant(val):
-    attr = ir.DenseElementsAttr.get(
-        np.array(val).reshape(()).astype(np.dtype(type(val)))
-    )
+    dtype = np.dtype(type(val)) if not isinstance(val, np.generic) else val.dtype
+    arr = np.array(val, dtype=dtype).reshape(())
+    attr = ir.DenseElementsAttr.get(arr)
     return mhlo.ConstantOp(attr).result
 
 
@@ -65,40 +65,141 @@ def _harmonica_transit_common(primitive_fn, times, params, r):
     broadcasted_params = []
     for p in params:
         p = jnp.asarray(p, dtype=jnp.float64)
-        if p.ndim == 0:
-            p = jnp.broadcast_to(p, (n,))
-        elif p.ndim == 1 and p.shape[0] != n:
+        if p.ndim == 0 or (p.ndim == 1 and p.shape[0] != n):
             p = jnp.broadcast_to(p, (n,))
         elif p.ndim != 1:
             raise ValueError(f"Unexpected parameter shape: {p.shape}")
         broadcasted_params.append(p)
 
-    # Flip sign of flux if r[0] is negative (model upside-down transit)
-    def shift_r0_if_needed(r_row):
-        r0 = r_row[0]
-        r_shifted = r_row.at[0].set(jnp.abs(r0))
-        return jnp.where(r0 < 0, r_shifted, r_row)
+    # === Ripple input validation and fixing ===
 
-    def replace_with_default_ripple(r_row):
-        fallback = r_row.at[1].set(1e-3)
-        if r_row.shape[0] > 3:
-            fallback = fallback.at[3].set(5e-4)
-        return fallback
+    def smooth_min_abs(x, min_abs=0.005, softness=1e-2):
+        """Smoothly enforce a minimum absolute value on `x`.
+
+        This function ensures that small values of `x` (e.g., the zeroth-order
+        ripple coefficient r[0]) are not allowed to approach zero, which could
+        cause degeneracies in light curve computations.
+
+        The transition between |x| < min_abs and |x| > min_abs is smoothed
+        using a sigmoid with width `softness`.
+
+        Parameters
+        ----------
+        x : float or array_like
+            Input values to regularize.
+        min_abs : float, optional
+            Minimum allowed absolute value. Defaults to 0.005, chosen to be
+            similar to the radius ratio of Mars around the Sun (~0.005),
+            ensuring the zeroth-order term is always physically meaningful.
+        softness : float, optional
+            Soft transition width for the regularization. Defaults to 0.01,
+            which provides a numerically stable but sharp enough transition.
+
+        Returns
+        -------
+        output : float or ndarray
+            Regularized values with smoothly enforced minimum magnitude.
+        """
+        sign = jnp.sign(x)
+        abs_x = jnp.abs(x)
+        blend = jax.nn.sigmoid((abs_x - min_abs) / softness)
+        return blend * x + (1 - blend) * sign * min_abs
+
+    def make_default_ripple(n, r0_sign=1.0, min_abs=0.005, base_amp=0.001,
+                            decay=0.3):
+        """
+        Create a fallback ripple coefficient vector with smooth harmonic decay.
+
+        This is used as a safe replacement when the input ripple coefficients
+        are invalid (e.g., NaNs or Infs) or too small to produce meaningful
+        results.
+
+        Parameters
+        ----------
+        n : int
+            Number of Fourier coefficients to generate.
+        r0_sign : float, optional
+            Sign to assign to the zeroth-order term, usually ±1.
+            Default is 1.0.
+        min_abs : float, optional
+            Absolute magnitude of the zeroth-order term (r[0]). Defaults to
+            0.005, matching the lower bound enforced by `smooth_min_abs`.
+        base_amp : float, optional
+            Amplitude of the first harmonic (r[1]). Defaults to 0.001,
+            representing a small but non-zero deviation from a circular
+            profile.
+        decay : float, optional
+            Geometric decay rate for higher harmonics. Defaults to 0.3, meaning
+            r[2] = 0.3 * r[1], r[3] = 0.3 * r[2], etc. This provides a natural,
+            smoothly tapered shape.
+
+        Returns
+        -------
+        ripple : ndarray of shape (n,)
+            Regularized ripple coefficients with safe magnitudes and decaying
+            harmonics.
+        """
+        r = jnp.zeros(n)
+        r = r.at[0].set(r0_sign * min_abs)
+        for i in range(1, n):
+            r = r.at[i].set(base_amp * decay ** (i - 1))
+        return r
 
     def enforce_min_ripple(r_row):
-        if r_row.shape[0] < 2:
-            return r_row
+        """Validate and regularize a ripple coefficient vector.
+
+        This function ensures that the Fourier shape coefficients defining the
+        planet's silhouette are both numerically valid and non-degenerate.
+
+        It handles two cases:
+        - If any coefficients are NaN/Inf or the ripple is empty: it falls back
+        entirely to a safe default using `make_default_ripple`.
+        - If the ripple harmonics exist but are too small in RMS: it blends
+        between the input and fallback using a sigmoid-weighted average.
+
+        Parameters
+        ----------
+        r_row : array_like of shape (k,)
+            Ripple coefficient vector (r[0], r[1], ..., r[k-1]) to validate.
+
+        Returns
+        -------
+        r_fixed : ndarray of shape (k,)
+            Regularized ripple vector with safe and meaningful values.
+        """
         ripple = r_row[1:]
-        rms = jnp.sqrt(jnp.mean(ripple ** 2))
-        return jax.lax.cond(rms < 1e-6, replace_with_default_ripple, lambda x: x, r_row)
+        ripple = jnp.nan_to_num(ripple, nan=0.0, posinf=0.0, neginf=0.0)
+
+        def fallback(_):
+            # If r[0] is zero, use +1 by default
+            r0_sign = jnp.where(r_row[0] != 0, jnp.sign(r_row[0]), 1.0)
+            return make_default_ripple(r_row.shape[0], r0_sign)
+
+        def normal(_):
+            # Root-mean-square of ripple harmonics (excluding r[0])
+            rms = jnp.sqrt(jnp.mean(ripple ** 2) + 1e-24)
+
+            # Below this RMS, we start to blend toward fallback
+            threshold = 3e-3
+
+            # Smoothing scale for transition: blend reaches ~50% at threshold
+            scale = 500.0  # sigmoid width = 1 / scale = 0.002
+
+            # Blend = 1 → full fallback, Blend = 0 → keep original
+            blend = jax.nn.sigmoid((threshold - rms) * scale)
+
+            return (1.0 - blend) * r_row + blend * fallback(None)
+
+        is_invalid = (ripple.size == 0) | jnp.any(~jnp.isfinite(ripple))
+        return jax.lax.cond(is_invalid, fallback, normal, operand=None)
 
     if r.ndim == 1:
         flip = r[0] < 0
-        r = shift_r0_if_needed(r)
+        r = r.at[0].set(smooth_min_abs(r[0]))
         r = enforce_min_ripple(r)
     elif r.ndim == 2:
         flip = r[:, 0] < 0
-        r = jax.vmap(shift_r0_if_needed)(r)
+        r = r.at[:, 0].set(smooth_min_abs(r[:, 0]))
         r = jax.vmap(enforce_min_ripple)(r)
     else:
         raise ValueError(f"`r` must be shape (k,) or (n, k); got {r.shape}")
@@ -107,13 +208,22 @@ def _harmonica_transit_common(primitive_fn, times, params, r):
     if r.ndim == 1:
         r_list = [jnp.broadcast_to(r[i], (n,)) for i in range(r.shape[0])]
     else:
-        r_list = [jnp.reshape(r[:, i], (n,)) for i in range(r.shape[1])]
+        r_list = [r[:, i] for i in range(r.shape[1])]
 
     # Combine all args and ensure all are float64 arrays.
-    args = [jnp.asarray(arg, dtype=jnp.float64) for arg in
-            (times, *broadcasted_params, *r_list)]
+    args = [jnp.asarray(arg, dtype=jnp.float64)
+            for arg in (times, *broadcasted_params, *r_list)]
 
     flux, *rest = primitive_fn(*args)
+
+    # Sanitize output flux to avoid NaNs from backend
+    flux = jnp.nan_to_num(flux, nan=1.0, posinf=1.0, neginf=1.0)
+
+    # Sanitize Jacobian if present
+    if rest:
+        rest = [jnp.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0) for x in rest]
+
+    # Flip upside-down transits if r[0] < 0
     flux = jnp.where(flip, 2.0 - flux, flux)
     return (flux, *rest)
 
@@ -214,26 +324,28 @@ def jax_light_curve_quad_ld_abstract_eval(abstract_times, *abstract_params):
 
 
 def jax_light_curve_quad_ld_xla_translation(ctx, timesc, *paramssc):
-    """ XLA compilation rules. """
-    # Get `shape` info.
-    timesc_shape = ctx.avals_in[0]
+    """MLIR lowering for quadratic LD transit model."""
 
-    # Define input `shapes`.
-    data_type = timesc_shape.dtype
-    shape = timesc_shape.shape
+    # 1. Use full abstract value for input `times`
+    timesc_aval = ctx.avals_in[0]
+    data_type = timesc_aval.dtype
+    shape = timesc_aval.shape
 
-    # Additionally, define the number of model evaluation points.
-    n_times = np.prod(shape).astype(np.int64)
-    n_times_const = ir_constant(np.int64(n_times))
+    # 2. Compute total number of time points (flattened)
+    n_times = int(np.prod(shape))  # Ensure integer type
+    n_times_const = ir_constant(n_times)
 
-    # Additionally, define the number of transmission string coefficients.
+    # 3. Count r coefficients from parameters:
+    #     total - 6 orbit - 2 LD
     n_rs = len(paramssc) - 6 - 2
-    n_rs_const = ir_constant(np.int64(n_rs))
+    n_rs_const = ir_constant(n_rs)
 
-    # Define output `shapes`.
+    # 4. Output shapes:
+    #    - 1D flux array of length n_times
+    #    - 2D derivatives array of shape (n_times, n_params)
     output_shape_model_eval = ir.RankedTensorType.get(
-        shape, ir_dtype(data_type))
-    shape_derivatives = shape + (6 + 2 + n_rs,)
+        (n_times,), ir_dtype(data_type))
+    shape_derivatives = (n_times, 6 + 2 + n_rs)
     output_shape_model_derivatives = ir.RankedTensorType.get(
         shape_derivatives, ir_dtype(data_type))
 
@@ -247,8 +359,8 @@ def jax_light_curve_quad_ld_xla_translation(ctx, timesc, *paramssc):
             list(reversed(range(len(shape))))
         ] * len(paramssc),
         result_layouts=[
-            list(reversed(range(len(shape)))),
-            list(reversed(range(len(shape_derivatives))))
+            [0],       # 1D flux output
+            [1, 0]     # 2D df/dparams output
         ]
     ).results
 
@@ -265,7 +377,7 @@ def jax_light_curve_quad_ld_value_and_jvp(arg_values, arg_tangents):
     # Compute grad.
     df = 0.
     for idx_pd, pd in enumerate(dargs):
-        if type(pd) is ad.Zero:
+        if isinstance(pd, ad.Zero):
             # This partial derivative is not required. It has been
             # set to a deterministic value.
             continue
@@ -377,19 +489,27 @@ def jax_light_curve_nonlinear_ld_abstract_eval(abstract_times,
 
 def jax_light_curve_nonlinear_xla_translation(ctx, timesc, *paramssc):
     """MLIR lowering for nonlinear LD transit model."""
-    timesc_shape = ctx.avals_in[0]
-    data_type = timesc_shape.dtype
-    shape = timesc_shape.shape
 
-    n_times = np.prod(shape).astype(np.int64)
+    # 1. Use full abstract value for input `times`
+    timesc_aval = ctx.avals_in[0]
+    data_type = timesc_aval.dtype
+    shape = timesc_aval.shape
+
+    # 2. Compute total number of time points (flattened)
+    n_times = int(np.prod(shape))  # Ensure it's Python int for ir_constant
     n_times_const = ir_constant(n_times)
 
+    # 3. Count r coefficients from parameters:
+    # total - 6 orbit - 4 limb darkening
     n_rs = len(paramssc) - 6 - 4
     n_rs_const = ir_constant(n_rs)
 
+    # 4. Fix output shapes to match what the C++ backend returns:
+    #    - A flat 1D flux array of length n_times
+    #    - A 2D array of shape (n_times, n_params)
     output_shape_model_eval = ir.RankedTensorType.get(
-        shape, ir_dtype(data_type))
-    shape_derivatives = shape + (6 + 4 + n_rs,)
+        (n_times,), ir_dtype(data_type))
+    shape_derivatives = (n_times, 6 + 4 + n_rs)
     output_shape_model_derivatives = ir.RankedTensorType.get(
         shape_derivatives, ir_dtype(data_type))
 
@@ -403,8 +523,8 @@ def jax_light_curve_nonlinear_xla_translation(ctx, timesc, *paramssc):
             list(reversed(range(len(shape))))
         ] * len(paramssc),
         result_layouts=[
-            list(reversed(range(len(shape)))),
-            list(reversed(range(len(shape_derivatives))))
+            [0],       # 1D flux output
+            [1, 0]     # 2D df/dparams output
         ]
     ).results
 
@@ -413,11 +533,19 @@ def jax_light_curve_nonlinear_ld_value_and_jvp(arg_values, arg_tangents):
     times, *args = arg_values
     _, *dargs = arg_tangents
 
-    f, df_dz = jax_light_curve_nonlinear_ld_prim(times, *args)
+    # Call the custom primitive while preventing JAX from trying to autodiff
+    # through it. This is important because we're supplying explicit
+    # derivatives (df_dz) below.
+    f, df_dz = jax_light_curve_nonlinear_ld_prim(
+        times, *args)
+
+    # Sanitize backend outputs to avoid NaNs leaking into autodiff
+    f = jnp.nan_to_num(f, nan=1.0, posinf=1.0, neginf=1.0)
+    df_dz = jnp.nan_to_num(df_dz, nan=0.0, posinf=0.0, neginf=0.0)
 
     df = 0.
     for idx_pd, pd in enumerate(dargs):
-        if type(pd) is ad.Zero:
+        if isinstance(pd, ad.Zero):
             continue
         df += pd * df_dz[..., idx_pd]
 
@@ -436,7 +564,8 @@ xla_client.register_custom_call_target(
 )
 
 
-# Common utility function to prepare arguments for primitives
+# Common utility function to call `_harmonica_transit_common`
+# Handles parameter broadcasting, ripple validation, etc.
 def _prepare_args_and_call_primitive(primitive_fn, times, param_list, r):
     return _harmonica_transit_common(primitive_fn, times, param_list, r)
 
