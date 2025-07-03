@@ -29,7 +29,10 @@ def ir_dtype(np_dtype):
 
 
 def ir_constant(val):
-    dtype = np.dtype(type(val)) if not isinstance(val, np.generic) else val.dtype
+    if not isinstance(val, np.generic):
+        dtype = np.dtype(type(val))
+    else:
+        dtype = val.dtype
     arr = np.array(val, dtype=dtype).reshape(())
     attr = ir.DenseElementsAttr.get(arr)
     return mhlo.ConstantOp(attr).result
@@ -221,7 +224,8 @@ def _harmonica_transit_common(primitive_fn, times, params, r):
 
     # Sanitize Jacobian if present
     if rest:
-        rest = [jnp.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0) for x in rest]
+        rest = [jnp.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+                for x in rest]
 
     # Flip upside-down transits if r[0] < 0
     flux = jnp.where(flip, 2.0 - flux, flux)
