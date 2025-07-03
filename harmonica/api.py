@@ -175,7 +175,7 @@ class HarmonicaTransit(object):
                     self._t0, self._period, self._a, self._inc, self._ecc,
                     self._omega, self._ld_mode, self._u, self._r[i],
                     t, f, self._pnl_c, self._pnl_e)
-                self.fs[i] = f
+                self.fs[i] = f[0]
 
         return np.copy(self.fs)
 
