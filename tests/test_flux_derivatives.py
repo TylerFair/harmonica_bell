@@ -141,6 +141,8 @@ class TestFlux(unittest.TestCase):
             self.times, self.t0, self.period, self.a, self.inc)
         self.assertEqual(f.shape, self.times.shape)
         self.assertEqual(np.sum(np.isfinite(f)), n_dp)
+        self.assertTrue(np.all(f >= 0.0))
+        self.assertTrue(np.all(f <= 1.0))
 
         # Check n_rs = 3.
         f = harmonica_transit_quad_ld(
@@ -149,6 +151,8 @@ class TestFlux(unittest.TestCase):
             r=jnp.array([0.1, -0.003, 0.]))
         self.assertEqual(f.shape, self.times.shape)
         self.assertEqual(np.sum(np.isfinite(f)), n_dp)
+        self.assertTrue(np.all(f >= 0.0))
+        self.assertTrue(np.all(f <= 1.0))
 
         # Check n_rs = 7.
         f = harmonica_transit_quad_ld(
@@ -157,6 +161,8 @@ class TestFlux(unittest.TestCase):
             r=jnp.array([0.1, -0.003, 0., 0., 0., 0., 0.001]))
         self.assertEqual(f.shape, self.times.shape)
         self.assertEqual(np.sum(np.isfinite(f)), n_dp)
+        self.assertTrue(np.all(f >= 0.0))
+        self.assertTrue(np.all(f <= 1.0))
 
     def test_api_jax_nonlinear_ld(self):
         """ Test jax api for non-linear limb-darkening. """
@@ -171,6 +177,8 @@ class TestFlux(unittest.TestCase):
             self.times, self.t0, self.period, self.a, self.inc)
         self.assertEqual(f.shape, self.times.shape)
         self.assertEqual(np.sum(np.isfinite(f)), n_dp)
+        self.assertTrue(np.all(f >= 0.0))
+        self.assertTrue(np.all(f <= 1.0))
 
         # Check n_rs = 3.
         f = f_jit(
@@ -179,6 +187,8 @@ class TestFlux(unittest.TestCase):
             r=jnp.array([0.1, -0.003, 0.]))
         self.assertEqual(f.shape, self.times.shape)
         self.assertEqual(np.sum(np.isfinite(f)), n_dp)
+        self.assertTrue(np.all(f >= 0.0))
+        self.assertTrue(np.all(f <= 1.0))
 
         # Check n_rs = 7.
         f = f_jit(
@@ -187,6 +197,8 @@ class TestFlux(unittest.TestCase):
             r=jnp.array([0.1, -0.003, 0., 0., 0., 0., 0.001]))
         self.assertEqual(f.shape, self.times.shape)
         self.assertEqual(np.sum(np.isfinite(f)), n_dp)
+        self.assertTrue(np.all(f >= 0.0))
+        self.assertTrue(np.all(f <= 1.0))
 
     def test_flux_derivative_quad_ld(self):
         """ Test flux derivative for quadratic limb-darkening. """
