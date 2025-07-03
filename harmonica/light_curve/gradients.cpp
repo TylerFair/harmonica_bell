@@ -230,10 +230,6 @@ void FluxDerivatives::s_star(int _j, int theta_type_j, double _theta_j,
     double drp_dtheta_j_p1 = this->drp_dtheta(_theta_j_p1);
     double dphi_j_denom = m_dd - 2. * d * rp_theta_j
                           * cos_thetajmnu + drpjs;
-    if (std::abs(dphi_j_denom) < 1e-12) {
-      dphi_j_denom = (dphi_j_denom >= 0.0) ? 1e-12 : -1e-12;
-      // This ensures the denominator can't go to zero and avoids NaNs in dphi_j_dd, dphi_j_dnu, etc.
-    }
     double dphi_j_p1_denom = m_dd - 2. * d * rp_theta_j_p1
                              * cos_thetajp1mnu + drpjp1s;
 
@@ -594,12 +590,6 @@ std::vector<double> FluxDerivatives::compute_real_theta_roots(
   // dC_dd, dC_dnu, m_dC_dcs.
   std::complex<double> h_4Nc = this->h_j(m_C_shape);
   std::complex<double> h_4Ncs = h_4Nc * h_4Nc;
-  // Guard against zero leading coefficient (which would cause division by zero below)
-  if (std::abs(h_4Ncs) < 1e-12) {
-    // If the leading polynomial coefficient is effectively zero, abort derivative computation
-    return {};
-  }
-
   for (int j = 1; j < m_C_shape + 1; j++) {
     std::complex<double> h_jm1 = this->h_j(j - 1);
     m_dC_dd(j - 1, m_C_shape - 1) = (h_jm1 * this->dh_j_dd(m_C_shape)
@@ -634,12 +624,6 @@ std::vector<double> FluxDerivatives::compute_real_theta_roots(
     double e_vals_abs = std::abs(e_vals(j));
     if (tolerance::unit_circle_lo < e_vals_abs
         && e_vals_abs < tolerance::unit_circle_hi) {
-
-      // Guard: skip eigenvalues that are effectively zero to avoid dividing by zero below
-      if (e_vals_abs < 1e-12) {
-        continue;
-      }
-
       _theta.push_back(std::arg(e_vals(j)));
 
       // dtheta_dd, dtheta_dnu, dtheta_dcs.
@@ -662,9 +646,6 @@ std::vector<double> FluxDerivatives::compute_real_theta_roots(
 void FluxDerivatives::analytic_even_terms(
     int _j, int theta_type_j, double _theta_j, double _theta_j_p1,
     const double d, const double nu) {
-
-  // Ensure d is not exactly zero to avoid degenerate scaling
-  const double d_safe = (std::abs(d) < 1e-12) ? 1e-12 : d;
 
   // Build and convolve beta_sin, beta_cos vectors.
   double _theta_diff = _theta_j_p1 - _theta_j;
@@ -735,8 +716,8 @@ void FluxDerivatives::analytic_even_terms(
       m_zeroes_c_conv_c, -(beta_cos_conv_c + beta_sin_conv_Delta_ew_c),
       m_len_c_conv_c, m_len_beta_conv_c);
   dq0_dnu = complex_ca_vector_addition(
-      m_zeroes_c_conv_c, -d_safe * (beta_cos_prime_conv_c
-                                    + beta_sin_prime_conv_Delta_ew_c),
+      m_zeroes_c_conv_c, -d * (beta_cos_prime_conv_c
+                              + beta_sin_prime_conv_Delta_ew_c),
       m_len_c_conv_c, m_len_beta_conv_c);
 
   Eigen::Vector<std::complex<double>, EigD>
@@ -746,7 +727,7 @@ void FluxDerivatives::analytic_even_terms(
   dq_lhs_dd(m_mid_q_lhs) += -2 * d;
   Eigen::Vector<std::complex<double>, EigD>
     dq_lhs_dnu = complex_ca_vector_addition(
-      -m_zeroes_c_conv_c, 2. * d_safe * beta_cos_prime_conv_c,
+      -m_zeroes_c_conv_c, 2. * d * beta_cos_prime_conv_c,
       m_len_c_conv_c, m_len_beta_conv_c);
 
   dq2_dd = complex_ca_vector_addition(
@@ -775,13 +756,13 @@ void FluxDerivatives::analytic_even_terms(
         beta_sin, m_els(npN_c), 3, m_n_rs, m_len_beta_conv_c);
 
     dq0_dcs(npN_c) = complex_ca_vector_addition(
-      2. * c_conv_el, -d_safe * (beta_cos_conv_el
+      2. * c_conv_el, -d * (beta_cos_conv_el
                             + 1.i * (1. * n) * beta_sin_conv_el),
       m_len_c_conv_c, m_len_beta_conv_c);
 
     Eigen::Vector<std::complex<double>, EigD>
       dq_lhs_dcn = complex_ca_vector_addition(
-        -2. * c_conv_el, 2. * d_safe * beta_cos_conv_el,
+        -2. * c_conv_el, 2. * d * beta_cos_conv_el,
         m_len_c_conv_c, m_len_beta_conv_c);
 
     dq2_dcs(npN_c) = complex_ca_vector_addition(
@@ -809,9 +790,8 @@ void FluxDerivatives::analytic_even_terms(
         ds0_q0_dcs[npN_c] += dq0_dcs(npN_c)(mpN_q0) * _theta_diff;
       }
     } else {
-      std::complex<double> denom = 1.i * (1. * m);
-      if (std::abs(denom) < 1e-12) denom = 1e-12;  // avoid exact-zero division
-      s0_planet += q0(mpN_q0) / denom * (eim_theta_j_p1 - eim_theta_j);
+      s0_planet += q0(mpN_q0) / (1.i * (1. * m))
+                   * (eim_theta_j_p1 - eim_theta_j);
 
       ds0_q0_dd += dq0_dd(mpN_q0) / (1.i * (1. * m))
                    * (eim_theta_j_p1 - eim_theta_j);
@@ -823,8 +803,7 @@ void FluxDerivatives::analytic_even_terms(
                              * (eim_theta_j_p1 - eim_theta_j);
       }
     }
-    if (theta_type_j == intersections::planet && _j < static_cast<int>(m_dthetas_dd.size()) - 1) {
-      // Guard against out-of-bounds if derivative vectors are incomplete
+    if (theta_type_j == intersections::planet) {
       ds0_theta_j_dx += q0(mpN_q0) * -eim_theta_j;
       ds0_theta_j_p1_dx += q0(mpN_q0) * eim_theta_j_p1;
     }
@@ -848,9 +827,8 @@ void FluxDerivatives::analytic_even_terms(
         ds2_q2_dcs[npN_c] += dq2_dcs(npN_c)(mpN_q2) * _theta_diff;
       }
     } else {
-      std::complex<double> denom = 1.i * (1. * m);
-      if (std::abs(denom) < 1e-12) denom = 1e-12;  // avoid exact-zero division
-      s2_planet += q2(mpN_q2) / denom * (eim_theta_j_p1 - eim_theta_j);
+      s2_planet += q2(mpN_q2) / (1.i * (1. * m))
+                   * (eim_theta_j_p1 - eim_theta_j);
 
       ds2_q2_dd += dq2_dd(mpN_q2) / (1.i * (1. * m))
                    * (eim_theta_j_p1 - eim_theta_j);
@@ -932,21 +910,14 @@ void FluxDerivatives::numerical_odd_terms(
       double d_rp_costkmnu = d * rp_tk * costkmnu;
       double d_drpdtheta_sintkmnu = d * drp_dtk * sintkmnu;
       double zp_tks = m_omdd - rp_tks + 2. * d_rp_costkmnu;
-      // Clamp zp_tks to avoid sqrt of negative (can happen at grazing edge)
-      if (zp_tks <= 0.0) continue;
       double zp_tk = std::sqrt(zp_tks);
-      // Clamp to avoid divide-by-zero in (1 - zp_tks) denominator
-      if (std::abs(1. - zp_tks) < 1e-12) continue;
       double zeta = (1. - zp_tks * zp_tk) / (3. * (1. - zp_tks));
       double eta = rp_tks - d_rp_costkmnu - d_drpdtheta_sintkmnu;
       s1_planet += zeta * eta * m_l_weights[k];
 
       double opzp = 1 + zp_tk;
-      if (opzp == 0.0) continue;  // Avoid 1/(1 + zp)^2 blowup
       double ds1_dzeta = eta * m_l_weights[k];
       double dzeta_dzp = fractions::one_third * (1. - 1. / (opzp * opzp));
-      // Clamp zp_tk to avoid division by zero
-      if (zp_tk < 1e-12) continue;
       double dzp_dd = (rp_tk * costkmnu - d) / zp_tk;
       double dzp_dnu = d * rp_tk * sintkmnu / zp_tk;
       double dzp_drp = (d * costkmnu - rp_tk) / zp_tk;
