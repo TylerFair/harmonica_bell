@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 
 
@@ -26,7 +26,7 @@ setup(
     author_email="david.grant@bristol.ac.uk",
     url="https://github.com/DavoGrant/harmonica",
     license="MIT",
-    packages=["harmonica", "harmonica.jax"],
+    packages=find_packages(where="."),
     description="Light curves for exoplanet transmission mapping.",
     long_description="Light curves for exoplanet transmission mapping.",
     python_requires=">=3.6",
