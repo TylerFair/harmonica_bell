@@ -32,6 +32,7 @@ Fluxes::Fluxes(int ld_law, double us[], int n_rs, double rs[],
 
     // Change to polynomial basis.
     m_p = B * u;
+
   } else {
     // Normalisation.
     double m_I_0_bt = (1. - us[0] / 5. - us[1] / 3.
@@ -141,12 +142,12 @@ void Fluxes::transit_flux(const double d, const double z,
 
   this->compute_solution_vector(d, z, nu);
 
-  // Compute transit flux: alpha=sTp, then normalize by I0
+  // Compute transit flux: alpha=I0sTp.
   if (m_ld_law == limb_darkening::quadratic) {
     m_alpha = m_I_0 * (m_s0 * m_p(0) + m_s1 * m_p(1) + m_s2 * m_p(2));
   } else {
     m_alpha = m_I_0 * (m_s0 * m_p(0) + m_s12 * m_p(1) + m_s1 * m_p(2)
-              + m_s32 * m_p(3) + m_s2 * m_p(4));
+                       + m_s32 * m_p(3) + m_s2 * m_p(4));
   }
   out_f = 1. - m_alpha;
 }

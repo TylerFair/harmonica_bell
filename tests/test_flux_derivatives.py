@@ -36,7 +36,7 @@ class TestFlux(unittest.TestCase):
 
         # Differential element and gradient error tolerance.
         self.epsilon = 1.e-8
-        self.grad_tol = 1.e-3
+        self.grad_tol = 1.e-4
 
         # Example params.
         self.t0 = 5.
@@ -202,7 +202,6 @@ class TestFlux(unittest.TestCase):
 
     def test_flux_derivative_quad_ld(self):
         """ Test flux derivative for quadratic limb-darkening. """
-        np.random.seed(42)
         param_names = ['t0', 'period', 'a', 'inc', 'ecc', 'omega', 'us', 'rs']
         for param_name in param_names:
             # Randomly generate trial light curves.
@@ -295,17 +294,6 @@ class TestFlux(unittest.TestCase):
                         grad_err = np.abs(finite_diff_grad - grad_component)
                     else:
                         grad_err = np.abs(finite_diff_grad - algebraic_grad)
-
-                    if grad_err >= self.grad_tol:
-                        print(f"\nGradient mismatch:")
-                        print(f"param: {param_name}, light curve {i}, data point {res_idx}")
-                        print(f"f_a: {f_a:.6e}, f_b: {f_b:.6e}")
-                        print(f"finite_diff_grad: {finite_diff_grad:.6e}")
-                        print(f"algebraic_grad: {algebraic_grad}")
-                        print(f"abs error: {grad_err:.6e} (tol: {self.grad_tol})")
-
-                        print(f"FAIL CASE for param {param_name}, dp {res_idx}")
-                        print(params)
 
                     self.assertLess(
                         grad_err, self.grad_tol,
@@ -405,14 +393,6 @@ class TestFlux(unittest.TestCase):
                         grad_err = np.abs(finite_diff_grad - grad_component)
                     else:
                         grad_err = np.abs(finite_diff_grad - algebraic_grad)
-
-                    if grad_err >= self.grad_tol:
-                        print(f"\nGradient mismatch:")
-                        print(f"param: {param_name}, light curve {i}, data point {res_idx}")
-                        print(f"f_a: {f_a:.6e}, f_b: {f_b:.6e}")
-                        print(f"finite_diff_grad: {finite_diff_grad:.6e}")
-                        print(f"algebraic_grad: {algebraic_grad}")
-                        print(f"abs error: {grad_err:.6e} (tol: {self.grad_tol})")
 
                     self.assertLess(
                         grad_err, self.grad_tol,
