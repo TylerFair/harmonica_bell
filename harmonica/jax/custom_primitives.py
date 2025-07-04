@@ -39,29 +39,88 @@ def ir_constant(val):
 
 
 def _harmonica_transit_common(primitive_fn, times, params, r):
-    """Internal helper function to broadcast inputs and call the JAX primitive.
+    """
+    Internal helper to evaluate JAX-based Harmonica with broadcasted inputs.
 
     Parameters
     ----------
     primitive_fn : Callable
-        The JAX primitive function to evaluate.
+        JAX primitive function that returns (flux, Jacobian).
     times : array_like
-        Scalar or 1D array of times at which to evaluate the model.
+        Scalar or 1D array of times [days] at which to evaluate the model.
     params : list of scalars or array_like
-        Orbital and limb-darkening parameters to be passed to the primitive.
+        Orbital and limb-darkening parameters to be broadcast.
     r : array_like
-        Fourier coefficients specifying the transmission string geometry.
+        Ripple coefficients specifying the planet silhouette. Must be shape
+        (k,) or (n, k).
 
     Returns
     -------
     outputs : tuple
-        Tuple of (flux, Jacobian), as returned by the primitive function.
+        Tuple (flux, [Jacobian]) with NaNs and Infs sanitized.
     """
-    # Convert to JAX arrays (allow scalars as 1D)
+    MIN_ABS = 1e-9                 # Minimum allowed coefficient to avoid bugs
+    SIGMOID_WIDTH = 0.1 * MIN_ABS  # Width of sigmoid transition to MIN_ABS
+    SAFE_SIGN_EPS = 1e-12          # Jitter to avoid divide-by-zero in sign
+
+    def smooth_min_abs(x, min_abs=MIN_ABS, softness=SIGMOID_WIDTH):
+        """Enforce differentiable minimum absolute value using a sigmoid blend.
+
+        This avoids non-differentiable behavior around |x| ≈ 0 by replacing it
+        with a smooth transition to `min_abs`.
+
+        Parameters
+        ----------
+        x : float or array_like
+            Input value(s) to regularize.
+        min_abs : float
+            Minimum allowed magnitude.
+        softness : float
+            Width of sigmoid transition between original and floored value.
+
+        Returns
+        -------
+        output : ndarray
+            Regularized values with smooth minimum magnitude.
+        """
+        abs_x = jnp.abs(x)
+        scale = (abs_x - min_abs) / softness
+        blend = jax.nn.sigmoid(scale)
+        # Use a differentiable approximation to sign(x)
+        safe_sign = x / jnp.sqrt(x**2 + SAFE_SIGN_EPS)
+        return blend * x + (1 - blend) * min_abs * safe_sign
+
+    def ensure_last_two_nonzero(r, min_tail=MIN_ABS,
+                                softness=SIGMOID_WIDTH):
+        """Ensure the last two ripple coefficients are not simultaneously zero.
+
+        Adds a soft floor to r[-2:] via sigmoid blending to avoid degeneracies.
+
+        Parameters
+        ----------
+        r : array_like
+            Ripple vector (length ≥ 3), shaped (k,).
+        min_tail : float
+            Minimum allowed absolute value for tail coefficients.
+        softness : float
+            Width of the soft transition region for sigmoid.
+
+        Returns
+        -------
+        r_fixed : ndarray
+            Ripple vector with non-zero tail values enforced.
+        """
+        tail = r[-2:]
+        abs_tail = jnp.abs(tail)
+        blend = jax.nn.sigmoid((jnp.sum(abs_tail) - min_tail) / softness)
+        safe_tail = jnp.sign(tail + SAFE_SIGN_EPS) * min_tail
+        new_tail = blend * tail + (1 - blend) * safe_tail
+        return r.at[-2:].set(new_tail)
+
+    # Validate times
     times = jnp.atleast_1d(jnp.asarray(times))
     if times.ndim > 1:
         raise ValueError("`times` must be a scalar or 1D array")
-
     n = times.shape[0]
 
     # Broadcast scalar/1D params to shape (n,)
@@ -74,161 +133,65 @@ def _harmonica_transit_common(primitive_fn, times, params, r):
             raise ValueError(f"Unexpected parameter shape: {p.shape}")
         broadcasted_params.append(p)
 
-    # === Ripple input validation and fixing ===
-
-    def smooth_min_abs(x, min_abs=0.005, softness=1e-2):
-        """Smoothly enforce a minimum absolute value on `x`.
-
-        This function ensures that small values of `x` (e.g., the zeroth-order
-        ripple coefficient r[0]) are not allowed to approach zero, which could
-        cause degeneracies in light curve computations.
-
-        The transition between |x| < min_abs and |x| > min_abs is smoothed
-        using a sigmoid with width `softness`.
-
-        Parameters
-        ----------
-        x : float or array_like
-            Input values to regularize.
-        min_abs : float, optional
-            Minimum allowed absolute value. Defaults to 0.005, chosen to be
-            similar to the radius ratio of Mars around the Sun (~0.005),
-            ensuring the zeroth-order term is always physically meaningful.
-        softness : float, optional
-            Soft transition width for the regularization. Defaults to 0.01,
-            which provides a numerically stable but sharp enough transition.
-
-        Returns
-        -------
-        output : float or ndarray
-            Regularized values with smoothly enforced minimum magnitude.
-        """
-        sign = jnp.sign(x)
-        abs_x = jnp.abs(x)
-        blend = jax.nn.sigmoid((abs_x - min_abs) / softness)
-        return blend * x + (1 - blend) * sign * min_abs
-
-    def make_default_ripple(n, r0_sign=1.0, min_abs=0.005, base_amp=0.001,
-                            decay=0.3):
-        """
-        Create a fallback ripple coefficient vector with smooth harmonic decay.
-
-        This is used as a safe replacement when the input ripple coefficients
-        are invalid (e.g., NaNs or Infs) or too small to produce meaningful
-        results.
-
-        Parameters
-        ----------
-        n : int
-            Number of Fourier coefficients to generate.
-        r0_sign : float, optional
-            Sign to assign to the zeroth-order term, usually ±1.
-            Default is 1.0.
-        min_abs : float, optional
-            Absolute magnitude of the zeroth-order term (r[0]). Defaults to
-            0.005, matching the lower bound enforced by `smooth_min_abs`.
-        base_amp : float, optional
-            Amplitude of the first harmonic (r[1]). Defaults to 0.001,
-            representing a small but non-zero deviation from a circular
-            profile.
-        decay : float, optional
-            Geometric decay rate for higher harmonics. Defaults to 0.3, meaning
-            r[2] = 0.3 * r[1], r[3] = 0.3 * r[2], etc. This provides a natural,
-            smoothly tapered shape.
-
-        Returns
-        -------
-        ripple : ndarray of shape (n,)
-            Regularized ripple coefficients with safe magnitudes and decaying
-            harmonics.
-        """
-        r = jnp.zeros(n)
-        r = r.at[0].set(r0_sign * min_abs)
-        for i in range(1, n):
-            r = r.at[i].set(base_amp * decay ** (i - 1))
-        return r
-
-    def enforce_min_ripple(r_row):
-        """Validate and regularize a ripple coefficient vector.
-
-        This function ensures that the Fourier shape coefficients defining the
-        planet's silhouette are both numerically valid and non-degenerate.
-
-        It handles two cases:
-        - If any coefficients are NaN/Inf or the ripple is empty: it falls back
-        entirely to a safe default using `make_default_ripple`.
-        - If the ripple harmonics exist but are too small in RMS: it blends
-        between the input and fallback using a sigmoid-weighted average.
-
-        Parameters
-        ----------
-        r_row : array_like of shape (k,)
-            Ripple coefficient vector (r[0], r[1], ..., r[k-1]) to validate.
-
-        Returns
-        -------
-        r_fixed : ndarray of shape (k,)
-            Regularized ripple vector with safe and meaningful values.
-        """
-        ripple = r_row[1:]
-        ripple = jnp.nan_to_num(ripple, nan=0.0, posinf=0.0, neginf=0.0)
-
-        def fallback(_):
-            # If r[0] is zero, use +1 by default
-            r0_sign = jnp.where(r_row[0] != 0, jnp.sign(r_row[0]), 1.0)
-            return make_default_ripple(r_row.shape[0], r0_sign)
-
-        def normal(_):
-            # Root-mean-square of ripple harmonics (excluding r[0])
-            rms = jnp.sqrt(jnp.mean(ripple ** 2) + 1e-24)
-
-            # Below this RMS, we start to blend toward fallback
-            threshold = 3e-3
-
-            # Smoothing scale for transition: blend reaches ~50% at threshold
-            scale = 500.0  # sigmoid width = 1 / scale = 0.002
-
-            # Blend = 1 → full fallback, Blend = 0 → keep original
-            blend = jax.nn.sigmoid((threshold - rms) * scale)
-
-            return (1.0 - blend) * r_row + blend * fallback(None)
-
-        is_invalid = (ripple.size == 0) | jnp.any(~jnp.isfinite(ripple))
-        return jax.lax.cond(is_invalid, fallback, normal, operand=None)
+    # Regularize ripple input
+    r = jnp.asarray(r, dtype=jnp.float64)
 
     if r.ndim == 1:
+        # Ensure ripple vector has odd length by appending a 0 if needed.
+        if r.shape[0] % 2 == 0:
+            r = jnp.append(r, 0.0)
+
+        # Track whether we need to flip the transit (i.e., r[0] < 0).
         flip = r[0] < 0
-        r = r.at[0].set(smooth_min_abs(r[0]))
-        r = enforce_min_ripple(r)
+
+        # Smoothly enforce a minimum magnitude on r[0] while preserving sign,
+        # to avoid degeneracies with near-zero transit depths.
+        r0_fixed = smooth_min_abs(jnp.abs(r[0]))
+        r = r.at[0].set(r0_fixed)
+
+        # Smoothly enforce that the last two coefficients are not
+        # simultaneously 0, which could lead to numerical issues in shape
+        # evaluation.
+        r = ensure_last_two_nonzero(r)
     elif r.ndim == 2:
+        # Ensure ripple vectors each have odd length (axis 1), pad last column
+        # with 0.
+        if r.shape[1] % 2 == 0:
+            r = jnp.pad(r, ((0, 0), (0, 1)), constant_values=0.0)
+
+        # Flip vector-wise: record where r[0] < 0 for each row.
         flip = r[:, 0] < 0
-        r = r.at[:, 0].set(smooth_min_abs(r[:, 0]))
-        r = jax.vmap(enforce_min_ripple)(r)
+
+        # Enforce a minimum |r[0]| smoothly, preserving sign.
+        r0_fixed = smooth_min_abs(jnp.abs(r[:, 0]))
+        r = r.at[:, 0].set(r0_fixed)
+
+        # For each time step, enforce that last two Fourier terms are non-zero.
+        r = jax.vmap(ensure_last_two_nonzero)(r)
     else:
         raise ValueError(f"`r` must be shape (k,) or (n, k); got {r.shape}")
 
-    # Rebuild r_list after fixing r
+    # Split ripple into list of args
     if r.ndim == 1:
         r_list = [jnp.broadcast_to(r[i], (n,)) for i in range(r.shape[0])]
     else:
         r_list = [r[:, i] for i in range(r.shape[1])]
 
-    # Combine all args and ensure all are float64 arrays.
+    # Combine all args
     args = [jnp.asarray(arg, dtype=jnp.float64)
             for arg in (times, *broadcasted_params, *r_list)]
 
     flux, *rest = primitive_fn(*args)
 
-    # Sanitize output flux to avoid NaNs from backend
+    # Sanitize flux and Jacobian to avoid NaNs/Infs from C++ backend
     flux = jnp.nan_to_num(flux, nan=1.0, posinf=1.0, neginf=1.0)
-
-    # Sanitize Jacobian if present
     if rest:
         rest = [jnp.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
                 for x in rest]
 
-    # Flip upside-down transits if r[0] < 0
+    # Flip transits upside-down if r[0] < 0
     flux = jnp.where(flip, 2.0 - flux, flux)
+
     return (flux, *rest)
 
 
