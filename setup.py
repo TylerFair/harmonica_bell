@@ -27,6 +27,7 @@ setup(
     url="https://github.com/DavoGrant/harmonica",
     license="MIT",
     packages=find_packages(where="."),
+    include_package_data=True,
     description="Light curves for exoplanet transmission mapping.",
     long_description="Light curves for exoplanet transmission mapping.",
     python_requires=">=3.6",
