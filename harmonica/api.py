@@ -156,7 +156,7 @@ class HarmonicaTransit(object):
             self._time_dep_strings = True
 
             # Flip the transit upside-down if needed.
-            self._flip_r = r[0] < 0
+            self._flip_r = r[:, 0] < 0
             r[self._flip_r, 0] *= -1
 
             # Require odd N coeffs.
