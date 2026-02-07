@@ -120,4 +120,36 @@ const void jax_light_curve_quad_ld(void* out_tuple, const void** in);
 const void jax_light_curve_nonlinear_ld(void* out_tuple, const void** in);
 
 
+/**
+ * Batched custom XLA call for quadratic LD model.
+ * Inputs include:
+ *   in[0] = batch size (int)
+ *   in[1] = number of time points (int)
+ *   in[2] = number of ripple coefficients (int)
+ *   in[3] = times[T]
+ *   in[4:12] = orbital/ld params with shape [B]
+ *   in[12:] = ripple coefficients (one array [B] per coeff)
+ * Outputs:
+ *   out[0] = flux[B, T]
+ *   out[1] = jac[B, T, P]
+ */
+const void jax_light_curve_quad_ld_batch(void* out_tuple, const void** in);
+
+
+/**
+ * Batched custom XLA call for non-linear LD model.
+ * Inputs include:
+ *   in[0] = batch size (int)
+ *   in[1] = number of time points (int)
+ *   in[2] = number of ripple coefficients (int)
+ *   in[3] = times[T]
+ *   in[4:14] = orbital/ld params with shape [B]
+ *   in[14:] = ripple coefficients (one array [B] per coeff)
+ * Outputs:
+ *   out[0] = flux[B, T]
+ *   out[1] = jac[B, T, P]
+ */
+const void jax_light_curve_nonlinear_ld_batch(void* out_tuple, const void** in);
+
+
 #endif

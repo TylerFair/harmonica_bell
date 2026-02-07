@@ -232,6 +232,134 @@ const void jax_light_curve_nonlinear_ld(void* out_tuple, const void** in) {
 }
 
 
+const void jax_light_curve_quad_ld_batch(void* out_tuple, const void** in) {
+
+  // Unpack input meta.
+  int batch_size = *((int*) in[0]);
+  int n_times = *((int*) in[1]);
+  int n_rs = *((int*) in[2]);
+
+  // Unpack shared arrays.
+  double* times = (double*) in[3];
+  double* t0 = (double*) in[4];
+  double* period = (double*) in[5];
+  double* a = (double*) in[6];
+  double* inc = (double*) in[7];
+  double* ecc = (double*) in[8];
+  double* omega = (double*) in[9];
+  double* u1 = (double*) in[10];
+  double* u2 = (double*) in[11];
+
+  // Unpack output data structures.
+  int n_x_derivatives = 6;
+  int n_y_derivatives = 2 + 2 + n_rs;
+  int n_z_derivatives = 6 + 2 + n_rs;
+  void **out = reinterpret_cast<void **>(out_tuple);
+  double* f = (double*) out[0];
+  double* df_dz = (double*) out[1];
+
+  for (int b = 0; b < batch_size; ++b) {
+    double us[2] {u1[b], u2[b]};
+    double rs[n_rs];
+    for (int i = 0; i < n_rs; ++i) {
+      rs[i] = ((double*) in[i + 12])[b];
+    }
+
+    OrbitDerivatives orbital(t0[b], period[b], a[b], inc[b], ecc[b], omega[b]);
+    FluxDerivatives flux(limb_darkening::quadratic, us, n_rs, rs, 20, 50);
+
+    for (int t = 0; t < n_times; t++) {
+
+      // Compute orbit and derivatives wrt x={t0, p, a, i, e, w}.
+      double d, z, nu;
+      double dd_dx[n_x_derivatives], dnu_dx[n_x_derivatives];
+      orbital.compute_eccentric_orbit_and_derivatives(
+        times[t], d, z, nu, dd_dx, dnu_dx);
+
+      // Compute flux and derivatives wrt y={d, nu, {us}, {rs}}.
+      double df_dy[n_y_derivatives];
+      int flux_idx = b * n_times + t;
+      flux.transit_flux_and_derivatives(d, z, nu, f[flux_idx], df_dy);
+
+      // Compute total derivatives wrt z={t0, p, a, i, e, w, {us}, {rs}}.
+      int idx_ravel = (flux_idx * n_z_derivatives);
+      for (int j = 0; j < n_z_derivatives; j++) {
+        if (j < 6) {
+          df_dz[idx_ravel + j] = df_dy[0] * dd_dx[j] + df_dy[1] * dnu_dx[j];
+        } else {
+          df_dz[idx_ravel + j] = df_dy[j - 4];
+        }
+      }
+    }
+  }
+}
+
+
+const void jax_light_curve_nonlinear_ld_batch(void* out_tuple, const void** in) {
+
+  // Unpack input meta.
+  int batch_size = *((int*) in[0]);
+  int n_times = *((int*) in[1]);
+  int n_rs = *((int*) in[2]);
+
+  // Unpack shared arrays.
+  double* times = (double*) in[3];
+  double* t0 = (double*) in[4];
+  double* period = (double*) in[5];
+  double* a = (double*) in[6];
+  double* inc = (double*) in[7];
+  double* ecc = (double*) in[8];
+  double* omega = (double*) in[9];
+  double* u1 = (double*) in[10];
+  double* u2 = (double*) in[11];
+  double* u3 = (double*) in[12];
+  double* u4 = (double*) in[13];
+
+  // Unpack output data structures.
+  int n_x_derivatives = 6;
+  int n_y_derivatives = 2 + 4 + n_rs;
+  int n_z_derivatives = 6 + 4 + n_rs;
+  void **out = reinterpret_cast<void **>(out_tuple);
+  double* f = (double*) out[0];
+  double* df_dz = (double*) out[1];
+
+  for (int b = 0; b < batch_size; ++b) {
+    double us[4] {u1[b], u2[b], u3[b], u4[b]};
+    double rs[n_rs];
+    for (int i = 0; i < n_rs; ++i) {
+      rs[i] = ((double*) in[i + 14])[b];
+    }
+
+    OrbitDerivatives orbital(t0[b], period[b], a[b], inc[b], ecc[b], omega[b]);
+    FluxDerivatives flux(limb_darkening::non_linear, us, n_rs, rs, 20, 50);
+
+    for (int t = 0; t < n_times; t++) {
+
+      // Compute orbit and derivatives wrt x={t0, p, a, i, e, w}.
+      double d, z, nu;
+      double dd_dx[n_x_derivatives], dnu_dx[n_x_derivatives];
+      orbital.compute_eccentric_orbit_and_derivatives(
+        times[t], d, z, nu, dd_dx, dnu_dx);
+
+      // Compute flux and derivatives wrt y={d, nu, {us}, {rs}}.
+      double df_dy[n_y_derivatives];
+      int flux_idx = b * n_times + t;
+      flux.transit_flux_and_derivatives(d, z, nu, f[flux_idx], df_dy);
+
+      // Compute total derivatives wrt z={t0, p, a, i, e, w, {us}, {rs}}.
+      int idx_ravel = (flux_idx * n_z_derivatives);
+      for (int j = 0; j < n_z_derivatives; j++) {
+        if (j < 6) {
+          df_dz[idx_ravel + j] = df_dy[0] * dd_dx[j] + df_dy[1] * dnu_dx[j];
+        } else {
+          df_dz[idx_ravel + j] = df_dy[j - 4];
+        }
+      }
+    }
+  }
+}
+
+
 template <typename T>
 py::capsule encapsulate(T* fn) {
   // JAX callables must be wrapped in this py::capsule.
@@ -246,6 +374,27 @@ py::dict jax_registrations() {
     jax_light_curve_quad_ld);
   dict["jax_light_curve_nonlinear_ld"] = encapsulate(
     jax_light_curve_nonlinear_ld);
+  dict["jax_light_curve_quad_ld_batch"] = encapsulate(
+    jax_light_curve_quad_ld_batch);
+  dict["jax_light_curve_nonlinear_ld_batch"] = encapsulate(
+    jax_light_curve_nonlinear_ld_batch);
+  return dict;
+}
+
+
+py::dict jax_registrations_cuda() {
+  // CUDA call targets are optional and compiled separately.
+  py::dict dict;
+#ifdef HARMONICA_ENABLE_CUDA
+  dict["jax_light_curve_quad_ld"] = encapsulate(
+    jax_light_curve_quad_ld);
+  dict["jax_light_curve_nonlinear_ld"] = encapsulate(
+    jax_light_curve_nonlinear_ld);
+  dict["jax_light_curve_quad_ld_batch"] = encapsulate(
+    jax_light_curve_quad_ld_batch);
+  dict["jax_light_curve_nonlinear_ld_batch"] = encapsulate(
+    jax_light_curve_nonlinear_ld_batch);
+#endif
   return dict;
 }
 
@@ -285,5 +434,6 @@ PYBIND11_MODULE(bindings, m) {
     py::arg("transmission_string") = py::none());
 
   m.def("jax_registrations", &jax_registrations);
+  m.def("jax_registrations_cuda", &jax_registrations_cuda);
 
 }

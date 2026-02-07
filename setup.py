@@ -1,5 +1,15 @@
+import pathlib
+import sys
+
 from setuptools import setup, find_packages
-from pybind11.setup_helpers import Pybind11Extension, build_ext
+
+try:
+    from pybind11.setup_helpers import Pybind11Extension, build_ext
+except ModuleNotFoundError:
+    # Fall back to vendored pybind11 for offline/source builds.
+    this_dir = pathlib.Path(__file__).resolve().parent
+    sys.path.insert(0, str(this_dir / "vendor" / "pybind11"))
+    from pybind11.setup_helpers import Pybind11Extension, build_ext
 
 
 ext_modules = [
