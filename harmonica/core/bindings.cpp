@@ -387,13 +387,13 @@ py::dict jax_registrations_cuda() {
   py::dict dict;
 #ifdef HARMONICA_ENABLE_CUDA
   dict["jax_light_curve_quad_ld"] = encapsulate(
-    jax_light_curve_quad_ld);
+    jax_light_curve_quad_ld_cuda);
   dict["jax_light_curve_nonlinear_ld"] = encapsulate(
-    jax_light_curve_nonlinear_ld);
+    jax_light_curve_nonlinear_ld_cuda);
   dict["jax_light_curve_quad_ld_batch"] = encapsulate(
-    jax_light_curve_quad_ld_batch);
+    jax_light_curve_quad_ld_batch_cuda);
   dict["jax_light_curve_nonlinear_ld_batch"] = encapsulate(
-    jax_light_curve_nonlinear_ld_batch);
+    jax_light_curve_nonlinear_ld_batch_cuda);
 #endif
   return dict;
 }

@@ -1,6 +1,7 @@
 #ifndef BINDINGS_HPP
 #define BINDINGS_HPP
 
+#include <cstddef>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 
@@ -150,6 +151,33 @@ const void jax_light_curve_quad_ld_batch(void* out_tuple, const void** in);
  *   out[1] = jac[B, T, P]
  */
 const void jax_light_curve_nonlinear_ld_batch(void* out_tuple, const void** in);
+
+#ifdef HARMONICA_ENABLE_CUDA
+/**
+ * CUDA custom-call wrapper for quadratic LD model.
+ */
+void jax_light_curve_quad_ld_cuda(void* stream, void** buffers,
+                                  const char* opaque, std::size_t opaque_len);
+
+/**
+ * CUDA custom-call wrapper for non-linear LD model.
+ */
+void jax_light_curve_nonlinear_ld_cuda(void* stream, void** buffers,
+                                       const char* opaque, std::size_t opaque_len);
+
+/**
+ * CUDA custom-call wrapper for batched quadratic LD model.
+ */
+void jax_light_curve_quad_ld_batch_cuda(void* stream, void** buffers,
+                                        const char* opaque, std::size_t opaque_len);
+
+/**
+ * CUDA custom-call wrapper for batched non-linear LD model.
+ */
+void jax_light_curve_nonlinear_ld_batch_cuda(void* stream, void** buffers,
+                                             const char* opaque,
+                                             std::size_t opaque_len);
+#endif
 
 
 #endif

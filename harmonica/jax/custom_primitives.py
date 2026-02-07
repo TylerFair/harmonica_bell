@@ -274,6 +274,7 @@ def jax_light_curve_quad_ld_xla_translation(ctx, timesc, *paramssc):
         b"jax_light_curve_quad_ld",
         result_types=[output_shape_model_eval, output_shape_model_derivatives],
         operands=[n_times_const, n_rs_const, timesc, *paramssc],
+        api_version=1,
         operand_layouts=[(), (), list(reversed(range(len(shape))))]
         + [list(reversed(range(len(shape))))] * len(paramssc),
         result_layouts=[[0], [1, 0]],
@@ -304,6 +305,7 @@ def jax_light_curve_quad_ld_batch_xla_translation(ctx, timesc, *paramssc):
         b"jax_light_curve_quad_ld_batch",
         result_types=[output_shape_model_eval, output_shape_model_derivatives],
         operands=[batch_size_const, n_times_const, n_rs_const, timesc, *paramssc],
+        api_version=1,
         operand_layouts=[(), (), (), [0]] + [[0]] * len(paramssc),
         result_layouts=[[1, 0], [2, 1, 0]],
     ).results
@@ -440,6 +442,7 @@ def jax_light_curve_nonlinear_xla_translation(ctx, timesc, *paramssc):
         b"jax_light_curve_nonlinear_ld",
         result_types=[output_shape_model_eval, output_shape_model_derivatives],
         operands=[n_times_const, n_rs_const, timesc, *paramssc],
+        api_version=1,
         operand_layouts=[(), (), list(reversed(range(len(shape))))]
         + [list(reversed(range(len(shape))))] * len(paramssc),
         result_layouts=[[0], [1, 0]],
@@ -470,6 +473,7 @@ def jax_light_curve_nonlinear_ld_batch_xla_translation(ctx, timesc, *paramssc):
         b"jax_light_curve_nonlinear_ld_batch",
         result_types=[output_shape_model_eval, output_shape_model_derivatives],
         operands=[batch_size_const, n_times_const, n_rs_const, timesc, *paramssc],
+        api_version=1,
         operand_layouts=[(), (), (), [0]] + [[0]] * len(paramssc),
         result_layouts=[[1, 0], [2, 1, 0]],
     ).results
@@ -521,7 +525,7 @@ def _register_custom_call_targets():
 
     regs = bindings.jax_registrations()
     for name in names:
-        xla_client.register_custom_call_target(name.encode("utf-8"), regs[name])
+        xla_client.register_custom_call_target(name, regs[name], api_version=0)
 
     has_cuda_targets = False
     if hasattr(bindings, "jax_registrations_cuda"):
@@ -530,7 +534,7 @@ def _register_custom_call_targets():
             for name in names:
                 if name in cuda_regs:
                     xla_client.register_custom_call_target(
-                        name.encode("utf-8"), cuda_regs[name], platform="cuda"
+                        name, cuda_regs[name], platform="gpu", api_version=0
                     )
             has_cuda_targets = True
 
