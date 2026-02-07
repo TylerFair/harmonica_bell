@@ -8,6 +8,7 @@ Tutorials
    Maximum likelihood estimation of a transmission string <tutorials/mle_transmission_string.ipynb>
    Basic inference of a transmission string <tutorials/basic_mcmc_transmission_string.ipynb>
    Gradient-based inference of a transmission string <tutorials/gradient_based_inference_transmission_string.ipynb>
+   GPU timing and batched light curves from gradient setup <tutorials/gradient_based_inference_gpu_batching.ipynb>
    Assessing model evidence <tutorials/assessing_model_evidence.ipynb>
    Calculate Fourier parameters from shape data <tutorials/calculate_parameters_from_shape_data.ipynb>
    Time-dependent shapes <tutorials/time_dependent_shapes.ipynb>
