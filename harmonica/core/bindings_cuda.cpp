@@ -178,7 +178,9 @@ bool validate_i32_range(int64_t v, const char* name) {
 }  // namespace
 
 void jax_light_curve_quad_ld_cuda(void* /*stream*/, void** buffers,
-                                  const char* /*opaque*/, std::size_t /*opaque_len*/) {
+                                  const char* /*opaque*/,
+                                  std::size_t /*opaque_len*/,
+                                  void* /*status*/) {
   constexpr int kBaseParams = 6 + 2;
   constexpr int kOutputCount = 2;
 
@@ -225,7 +227,7 @@ void jax_light_curve_quad_ld_cuda(void* /*stream*/, void** buffers,
                                static_cast<size_t>(kBaseParams + n_rs));
 
   void* out_tuple[kOutputCount] = {f_host.data(), jac_host.data()};
-  jax_light_curve_quad_ld(out_tuple, in_ptrs.data());
+  jax_light_curve_quad_ld(out_tuple, in_ptrs.data(), nullptr);
 
   if (!copy_doubles_to_device(f_host, buffers[layout.output_base]) ||
       !copy_doubles_to_device(jac_host, buffers[layout.output_base + 1])) {
@@ -234,7 +236,9 @@ void jax_light_curve_quad_ld_cuda(void* /*stream*/, void** buffers,
 }
 
 void jax_light_curve_nonlinear_ld_cuda(void* /*stream*/, void** buffers,
-                                       const char* /*opaque*/, std::size_t /*opaque_len*/) {
+                                       const char* /*opaque*/,
+                                       std::size_t /*opaque_len*/,
+                                       void* /*status*/) {
   constexpr int kBaseParams = 6 + 4;
   constexpr int kOutputCount = 2;
 
@@ -279,7 +283,7 @@ void jax_light_curve_nonlinear_ld_cuda(void* /*stream*/, void** buffers,
                                static_cast<size_t>(kBaseParams + n_rs));
 
   void* out_tuple[kOutputCount] = {f_host.data(), jac_host.data()};
-  jax_light_curve_nonlinear_ld(out_tuple, in_ptrs.data());
+  jax_light_curve_nonlinear_ld(out_tuple, in_ptrs.data(), nullptr);
 
   if (!copy_doubles_to_device(f_host, buffers[layout.output_base]) ||
       !copy_doubles_to_device(jac_host, buffers[layout.output_base + 1])) {
@@ -288,7 +292,9 @@ void jax_light_curve_nonlinear_ld_cuda(void* /*stream*/, void** buffers,
 }
 
 void jax_light_curve_quad_ld_batch_cuda(void* /*stream*/, void** buffers,
-                                        const char* /*opaque*/, std::size_t /*opaque_len*/) {
+                                        const char* /*opaque*/,
+                                        std::size_t /*opaque_len*/,
+                                        void* /*status*/) {
   constexpr int kBaseParams = 6 + 2;
   constexpr int kOutputCount = 2;
 
@@ -339,7 +345,7 @@ void jax_light_curve_quad_ld_batch_cuda(void* /*stream*/, void** buffers,
   std::vector<double> jac_host(jac_size);
 
   void* out_tuple[kOutputCount] = {f_host.data(), jac_host.data()};
-  jax_light_curve_quad_ld_batch(out_tuple, in_ptrs.data());
+  jax_light_curve_quad_ld_batch(out_tuple, in_ptrs.data(), nullptr);
 
   if (!copy_doubles_to_device(f_host, buffers[layout.output_base]) ||
       !copy_doubles_to_device(jac_host, buffers[layout.output_base + 1])) {
@@ -349,7 +355,8 @@ void jax_light_curve_quad_ld_batch_cuda(void* /*stream*/, void** buffers,
 
 void jax_light_curve_nonlinear_ld_batch_cuda(void* /*stream*/, void** buffers,
                                              const char* /*opaque*/,
-                                             std::size_t /*opaque_len*/) {
+                                             std::size_t /*opaque_len*/,
+                                             void* /*status*/) {
   constexpr int kBaseParams = 6 + 4;
   constexpr int kOutputCount = 2;
 
@@ -400,7 +407,7 @@ void jax_light_curve_nonlinear_ld_batch_cuda(void* /*stream*/, void** buffers,
   std::vector<double> jac_host(jac_size);
 
   void* out_tuple[kOutputCount] = {f_host.data(), jac_host.data()};
-  jax_light_curve_nonlinear_ld_batch(out_tuple, in_ptrs.data());
+  jax_light_curve_nonlinear_ld_batch(out_tuple, in_ptrs.data(), nullptr);
 
   if (!copy_doubles_to_device(f_host, buffers[layout.output_base]) ||
       !copy_doubles_to_device(jac_host, buffers[layout.output_base + 1])) {

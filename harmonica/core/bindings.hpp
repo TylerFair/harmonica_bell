@@ -97,7 +97,7 @@ void compute_transmission_string(
  *        future releases.
  * @return void.
  */
-const void jax_light_curve_quad_ld(void* out_tuple, const void** in);
+const void jax_light_curve_quad_ld(void* out_tuple, const void** in, void* status);
 
 
 /**
@@ -118,7 +118,8 @@ const void jax_light_curve_quad_ld(void* out_tuple, const void** in);
  *        in future releases.
  * @return void.
  */
-const void jax_light_curve_nonlinear_ld(void* out_tuple, const void** in);
+const void jax_light_curve_nonlinear_ld(void* out_tuple, const void** in,
+                                        void* status);
 
 
 /**
@@ -134,7 +135,8 @@ const void jax_light_curve_nonlinear_ld(void* out_tuple, const void** in);
  *   out[0] = flux[B, T]
  *   out[1] = jac[B, T, P]
  */
-const void jax_light_curve_quad_ld_batch(void* out_tuple, const void** in);
+const void jax_light_curve_quad_ld_batch(void* out_tuple, const void** in,
+                                         void* status);
 
 
 /**
@@ -150,33 +152,38 @@ const void jax_light_curve_quad_ld_batch(void* out_tuple, const void** in);
  *   out[0] = flux[B, T]
  *   out[1] = jac[B, T, P]
  */
-const void jax_light_curve_nonlinear_ld_batch(void* out_tuple, const void** in);
+const void jax_light_curve_nonlinear_ld_batch(void* out_tuple, const void** in,
+                                              void* status);
 
 #ifdef HARMONICA_ENABLE_CUDA
 /**
  * CUDA custom-call wrapper for quadratic LD model.
  */
 void jax_light_curve_quad_ld_cuda(void* stream, void** buffers,
-                                  const char* opaque, std::size_t opaque_len);
+                                  const char* opaque, std::size_t opaque_len,
+                                  void* status);
 
 /**
  * CUDA custom-call wrapper for non-linear LD model.
  */
 void jax_light_curve_nonlinear_ld_cuda(void* stream, void** buffers,
-                                       const char* opaque, std::size_t opaque_len);
+                                       const char* opaque, std::size_t opaque_len,
+                                       void* status);
 
 /**
  * CUDA custom-call wrapper for batched quadratic LD model.
  */
 void jax_light_curve_quad_ld_batch_cuda(void* stream, void** buffers,
-                                        const char* opaque, std::size_t opaque_len);
+                                        const char* opaque, std::size_t opaque_len,
+                                        void* status);
 
 /**
  * CUDA custom-call wrapper for batched non-linear LD model.
  */
 void jax_light_curve_nonlinear_ld_batch_cuda(void* stream, void** buffers,
                                              const char* opaque,
-                                             std::size_t opaque_len);
+                                             std::size_t opaque_len,
+                                             void* status);
 #endif
 
 

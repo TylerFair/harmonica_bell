@@ -22,6 +22,11 @@ from harmonica.core import bindings
 from harmonica.jax.custom_primitives import _quad_ld_flux_and_derivatives_batch
 
 
+def _first_device(platform: str):
+    devices = [d for d in jax.devices() if d.platform == platform]
+    return devices[0] if devices else None
+
+
 def build_inputs(batch_size: int, n_times: int, n_rs: int):
     rng = np.random.default_rng(42)
     times = jnp.linspace(-0.15, 0.15, n_times)
@@ -47,8 +52,8 @@ def build_inputs(batch_size: int, n_times: int, n_rs: int):
 
 
 def verify_batch_vs_loop(params):
-    cpu_device = [d for d in jax.devices() if d.platform == "cpu"][0]
-    with jax.default_device(cpu_device):
+    cpu_device = _first_device("cpu")
+    if cpu_device is None:
         batch_flux = harmonica_transit_quad_ld_batch(
             params["times"],
             params["t0"],
@@ -61,7 +66,6 @@ def verify_batch_vs_loop(params):
             params["u2"],
             params["r"],
         )
-
         loop_flux = jnp.stack(
             [
                 harmonica_transit_quad_ld(
@@ -80,6 +84,39 @@ def verify_batch_vs_loop(params):
             ],
             axis=0,
         )
+    else:
+        with jax.default_device(cpu_device):
+            batch_flux = harmonica_transit_quad_ld_batch(
+                params["times"],
+                params["t0"],
+                params["period"],
+                params["a"],
+                params["inc"],
+                params["ecc"],
+                params["omega"],
+                params["u1"],
+                params["u2"],
+                params["r"],
+            )
+
+            loop_flux = jnp.stack(
+                [
+                    harmonica_transit_quad_ld(
+                        params["times"],
+                        t0=params["t0"][i],
+                        period=params["period"],
+                        a=params["a"],
+                        inc=params["inc"],
+                        ecc=params["ecc"],
+                        omega=params["omega"],
+                        u1=params["u1"][i],
+                        u2=params["u2"][i],
+                        r=params["r"][i],
+                    )
+                    for i in range(params["r"].shape[0])
+                ],
+                axis=0,
+            )
 
     max_diff = float(np.max(np.abs(np.asarray(batch_flux - loop_flux))))
     return max_diff
@@ -102,8 +139,8 @@ def verify_grad(params):
             )
         )
 
-    cpu_device = [d for d in jax.devices() if d.platform == "cpu"][0]
-    with jax.default_device(cpu_device):
+    cpu_device = _first_device("cpu")
+    if cpu_device is None:
         grad_t0 = jax.grad(scalar_sum)(params["t0"])
         f, jac = _quad_ld_flux_and_derivatives_batch(
             params["times"],
@@ -117,6 +154,21 @@ def verify_grad(params):
             params["u2"],
             params["r"],
         )
+    else:
+        with jax.default_device(cpu_device):
+            grad_t0 = jax.grad(scalar_sum)(params["t0"])
+            f, jac = _quad_ld_flux_and_derivatives_batch(
+                params["times"],
+                params["t0"],
+                params["period"],
+                params["a"],
+                params["inc"],
+                params["ecc"],
+                params["omega"],
+                params["u1"],
+                params["u2"],
+                params["r"],
+            )
     grad_ok = bool(np.all(np.isfinite(np.asarray(grad_t0))))
 
     jac_ok = bool(np.all(np.isfinite(np.asarray(f))) and np.all(np.isfinite(np.asarray(jac))))
@@ -130,6 +182,31 @@ def verify_gpu_parity(params):
     cuda_targets = bindings.jax_registrations_cuda()
     if len(cuda_targets) == 0:
         return None, "no-cuda-custom-call-targets"
+
+    cpu_devices = [d for d in jax.devices() if d.platform == "cpu"]
+    if not cpu_devices:
+        gpu_fn = jax.jit(
+            lambda: harmonica_transit_quad_ld_batch(
+                params["times"],
+                params["t0"],
+                params["period"],
+                params["a"],
+                params["inc"],
+                params["ecc"],
+                params["omega"],
+                params["u1"],
+                params["u2"],
+                params["r"],
+            ),
+            backend="gpu",
+        )
+        try:
+            gpu_flux = np.asarray(gpu_fn())
+            if not np.all(np.isfinite(gpu_flux)):
+                return None, "gpu-smoke-nonfinite"
+        except Exception as exc:  # pragma: no cover - diagnostic path
+            return None, f"gpu-error:{exc}"
+        return None, "gpu-smoke-ok-no-cpu-device"
 
     cpu_fn = jax.jit(
         lambda: harmonica_transit_quad_ld_batch(
@@ -205,6 +282,8 @@ def main():
         print("cpu_gpu_max_abs_diff:", gpu_diff)
         if gpu_diff > args.rtol:
             raise SystemExit(f"CPU/GPU parity failed: {gpu_diff} > {args.rtol}")
+    elif gpu_status == "gpu-smoke-ok-no-cpu-device":
+        print("gpu_smoke: ok (CPU backend not visible; parity check skipped)")
     elif args.require_gpu:
         raise SystemExit(
             "GPU parity requested but GPU path is unavailable "

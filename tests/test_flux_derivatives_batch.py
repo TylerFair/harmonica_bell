@@ -307,6 +307,9 @@ class TestFluxBatch(unittest.TestCase):
         cuda_devices = [d for d in jax.devices() if d.platform == "gpu"]
         if not cuda_devices:
             self.skipTest("CUDA device not available")
+        cpu_devices = [d for d in jax.devices() if d.platform == "cpu"]
+        if not cpu_devices:
+            self.skipTest("CPU backend not visible; cannot run CPU/GPU parity")
 
         (
             times,

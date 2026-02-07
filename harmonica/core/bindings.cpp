@@ -117,7 +117,8 @@ void compute_transmission_string(
 }
 
 
-const void jax_light_curve_quad_ld(void* out_tuple, const void** in) {
+const void jax_light_curve_quad_ld(void* out_tuple, const void** in,
+                                   void* /*status*/) {
 
   // Unpack input meta.
   int n_times = *((int*) in[0]);
@@ -174,7 +175,8 @@ const void jax_light_curve_quad_ld(void* out_tuple, const void** in) {
 }
 
 
-const void jax_light_curve_nonlinear_ld(void* out_tuple, const void** in) {
+const void jax_light_curve_nonlinear_ld(void* out_tuple, const void** in,
+                                        void* /*status*/) {
 
   // Unpack input meta.
   int n_times = *((int*) in[0]);
@@ -232,7 +234,8 @@ const void jax_light_curve_nonlinear_ld(void* out_tuple, const void** in) {
 }
 
 
-const void jax_light_curve_quad_ld_batch(void* out_tuple, const void** in) {
+const void jax_light_curve_quad_ld_batch(void* out_tuple, const void** in,
+                                         void* /*status*/) {
 
   // Unpack input meta.
   int batch_size = *((int*) in[0]);
@@ -295,7 +298,8 @@ const void jax_light_curve_quad_ld_batch(void* out_tuple, const void** in) {
 }
 
 
-const void jax_light_curve_nonlinear_ld_batch(void* out_tuple, const void** in) {
+const void jax_light_curve_nonlinear_ld_batch(void* out_tuple, const void** in,
+                                              void* /*status*/) {
 
   // Unpack input meta.
   int batch_size = *((int*) in[0]);
