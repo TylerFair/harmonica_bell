@@ -531,11 +531,15 @@ def _register_custom_call_targets():
     if hasattr(bindings, "jax_registrations_cuda"):
         cuda_regs = bindings.jax_registrations_cuda()
         if len(cuda_regs) > 0:
+            # Different JAX/jaxlib builds may identify the GPU runtime with
+            # different backend names. Register all relevant aliases.
+            gpu_platform_aliases = ("cuda", "gpu", "CUDA")
             for name in names:
                 if name in cuda_regs:
-                    xla_client.register_custom_call_target(
-                        name, cuda_regs[name], platform="gpu", api_version=0
-                    )
+                    for platform in gpu_platform_aliases:
+                        xla_client.register_custom_call_target(
+                            name, cuda_regs[name], platform=platform, api_version=0
+                        )
             has_cuda_targets = True
 
     return has_cuda_targets
@@ -624,26 +628,27 @@ mlir.register_lowering(
 
 # CUDA lowerings are optional and enabled only when targets are available.
 if HAS_CUDA_TARGETS:
-    mlir.register_lowering(
-        jax_light_curve_quad_ld_p,
-        jax_light_curve_quad_ld_xla_translation,
-        platform="cuda",
-    )
-    mlir.register_lowering(
-        jax_light_curve_nonlinear_ld_p,
-        jax_light_curve_nonlinear_xla_translation,
-        platform="cuda",
-    )
-    mlir.register_lowering(
-        jax_light_curve_quad_ld_batch_p,
-        jax_light_curve_quad_ld_batch_xla_translation,
-        platform="cuda",
-    )
-    mlir.register_lowering(
-        jax_light_curve_nonlinear_ld_batch_p,
-        jax_light_curve_nonlinear_ld_batch_xla_translation,
-        platform="cuda",
-    )
+    for platform in ("cuda", "gpu"):
+        mlir.register_lowering(
+            jax_light_curve_quad_ld_p,
+            jax_light_curve_quad_ld_xla_translation,
+            platform=platform,
+        )
+        mlir.register_lowering(
+            jax_light_curve_nonlinear_ld_p,
+            jax_light_curve_nonlinear_xla_translation,
+            platform=platform,
+        )
+        mlir.register_lowering(
+            jax_light_curve_quad_ld_batch_p,
+            jax_light_curve_quad_ld_batch_xla_translation,
+            platform=platform,
+        )
+        mlir.register_lowering(
+            jax_light_curve_nonlinear_ld_batch_p,
+            jax_light_curve_nonlinear_ld_batch_xla_translation,
+            platform=platform,
+        )
 
 # JVP rules.
 ad.primitive_jvps[jax_light_curve_quad_ld_p] = jax_light_curve_quad_ld_value_and_jvp
