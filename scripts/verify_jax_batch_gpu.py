@@ -18,6 +18,7 @@ from harmonica.jax import (
     harmonica_transit_quad_ld,
     harmonica_transit_quad_ld_batch,
 )
+from harmonica.core import bindings
 from harmonica.jax.custom_primitives import _quad_ld_flux_and_derivatives_batch
 
 
@@ -46,37 +47,39 @@ def build_inputs(batch_size: int, n_times: int, n_rs: int):
 
 
 def verify_batch_vs_loop(params):
-    batch_flux = harmonica_transit_quad_ld_batch(
-        params["times"],
-        params["t0"],
-        params["period"],
-        params["a"],
-        params["inc"],
-        params["ecc"],
-        params["omega"],
-        params["u1"],
-        params["u2"],
-        params["r"],
-    )
+    cpu_device = [d for d in jax.devices() if d.platform == "cpu"][0]
+    with jax.default_device(cpu_device):
+        batch_flux = harmonica_transit_quad_ld_batch(
+            params["times"],
+            params["t0"],
+            params["period"],
+            params["a"],
+            params["inc"],
+            params["ecc"],
+            params["omega"],
+            params["u1"],
+            params["u2"],
+            params["r"],
+        )
 
-    loop_flux = jnp.stack(
-        [
-            harmonica_transit_quad_ld(
-                params["times"],
-                t0=params["t0"][i],
-                period=params["period"],
-                a=params["a"],
-                inc=params["inc"],
-                ecc=params["ecc"],
-                omega=params["omega"],
-                u1=params["u1"][i],
-                u2=params["u2"][i],
-                r=params["r"][i],
-            )
-            for i in range(params["r"].shape[0])
-        ],
-        axis=0,
-    )
+        loop_flux = jnp.stack(
+            [
+                harmonica_transit_quad_ld(
+                    params["times"],
+                    t0=params["t0"][i],
+                    period=params["period"],
+                    a=params["a"],
+                    inc=params["inc"],
+                    ecc=params["ecc"],
+                    omega=params["omega"],
+                    u1=params["u1"][i],
+                    u2=params["u2"][i],
+                    r=params["r"][i],
+                )
+                for i in range(params["r"].shape[0])
+            ],
+            axis=0,
+        )
 
     max_diff = float(np.max(np.abs(np.asarray(batch_flux - loop_flux))))
     return max_diff
@@ -99,21 +102,22 @@ def verify_grad(params):
             )
         )
 
-    grad_t0 = jax.grad(scalar_sum)(params["t0"])
+    cpu_device = [d for d in jax.devices() if d.platform == "cpu"][0]
+    with jax.default_device(cpu_device):
+        grad_t0 = jax.grad(scalar_sum)(params["t0"])
+        f, jac = _quad_ld_flux_and_derivatives_batch(
+            params["times"],
+            params["t0"],
+            params["period"],
+            params["a"],
+            params["inc"],
+            params["ecc"],
+            params["omega"],
+            params["u1"],
+            params["u2"],
+            params["r"],
+        )
     grad_ok = bool(np.all(np.isfinite(np.asarray(grad_t0))))
-
-    f, jac = _quad_ld_flux_and_derivatives_batch(
-        params["times"],
-        params["t0"],
-        params["period"],
-        params["a"],
-        params["inc"],
-        params["ecc"],
-        params["omega"],
-        params["u1"],
-        params["u2"],
-        params["r"],
-    )
 
     jac_ok = bool(np.all(np.isfinite(np.asarray(f))) and np.all(np.isfinite(np.asarray(jac))))
     return grad_ok and jac_ok
@@ -123,6 +127,9 @@ def verify_gpu_parity(params):
     gpu_devices = [d for d in jax.devices() if d.platform == "gpu"]
     if not gpu_devices:
         return None, "no-gpu"
+    cuda_targets = bindings.jax_registrations_cuda()
+    if len(cuda_targets) == 0:
+        return None, "no-cuda-custom-call-targets"
 
     cpu_fn = jax.jit(
         lambda: harmonica_transit_quad_ld_batch(
@@ -176,6 +183,8 @@ def main():
 
     devices = [f"{d.platform}:{d.id}" for d in jax.devices()]
     print("devices:", devices)
+    cuda_target_names = sorted(bindings.jax_registrations_cuda().keys())
+    print("cuda_custom_call_targets:", cuda_target_names)
 
     params = build_inputs(args.batch_size, args.n_times, args.n_rs)
 
@@ -197,7 +206,11 @@ def main():
         if gpu_diff > args.rtol:
             raise SystemExit(f"CPU/GPU parity failed: {gpu_diff} > {args.rtol}")
     elif args.require_gpu:
-        raise SystemExit("GPU parity requested but GPU path is unavailable")
+        raise SystemExit(
+            "GPU parity requested but GPU path is unavailable "
+            f"(status={gpu_status}). If status=no-cuda-custom-call-targets, "
+            "rebuild with HARMONICA_ENABLE_CUDA=1."
+        )
 
 
 if __name__ == "__main__":
